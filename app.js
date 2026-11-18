@@ -68,7 +68,7 @@ function downloadCSV(name, rows) {
 
 /* ---------- API ---------- */
 const isNet = e => e instanceof TypeError || /Failed to fetch|NetworkError|Load failed/i.test(String(e && e.message));
-async function api(action, data) {
+async function rawApi(action, data) {
   if (!apiUrl()) throw new Error('URL Apps Script belum diisi.');
   let res;
   try {
@@ -81,9 +81,23 @@ async function api(action, data) {
   }
   return j.data;
 }
-async function loadMaster() {
-  const [p, k, c] = await Promise.all([api('produk.list'), api('kategori.list'), api('pengaturan.get')]);
-  S.produk = p; S.kategori = k; S.cfg = c; localStorage.setItem('yy_master', JSON.stringify({ p, k, c }));
+/* Cache baca 30 detik + dedupe permintaan: Apps Script butuh 1-3 detik per panggilan, jadi panggilan diminimalkan. */
+const READ = /^(master\.get|produk\.list|kategori\.list|pengaturan\.get|stok\.(list|kartu)|laporan\.|transaksi\.(list|get)|biaya\.list)/;
+const memo = new Map();
+async function api(action, data, opt) {
+  if (READ.test(action)) {
+    const key = action + JSON.stringify(data || {}), hit = memo.get(key);
+    if (!(opt && opt.fresh) && hit && Date.now() - hit.t < 30000) return hit.p;
+    const p = rawApi(action, data); memo.set(key, { t: Date.now(), p }); p.catch(() => memo.delete(key)); return p;
+  }
+  const r = await rawApi(action, data);
+  if (action !== 'login') { memo.clear(); if (action !== 'logout') loadMaster().catch(() => { }); } else memo.clear();
+  return r;
+}
+async function loadMaster(fresh) {
+  const m = await api('master.get', {}, { fresh: !!fresh });
+  S.produk = m.produk; S.kategori = m.kategori; S.cfg = m.pengaturan;
+  localStorage.setItem('yy_master', JSON.stringify({ p: m.produk, k: m.kategori, c: m.pengaturan }));
 }
 
 /* ---------- Antrean offline (transaksi baru) ---------- */
@@ -213,8 +227,9 @@ async function trxForm(id) {
     F.manual = t.channel !== 'Offline' && num(t.admin_persen) === 0 && num(t.biaya_admin) > 0; F.admin = F.manual ? t.biaya_admin : '';
     F.items = d.detail.map(x => ({ sku: x.sku, qty: x.qty, harga_satuan: x.harga_satuan, diskon: x.diskon })); d.detail.forEach(x => F.hpp[x.sku] = num(x.hpp_satuan));
   } else F.items = [{ sku: '', qty: 1, harga_satuan: '', diskon: 0 }];
+  try { await loadMaster(); } catch (e) { /* offline: pakai data tersimpan */ }
   const pm = {}; S.produk.forEach(p => pm[p.sku] = p);
-  const sm = {}; try { (await api('stok.list')).forEach(x => sm[x.sku] = x.stok); } catch (e) { /* offline: tanpa info stok */ }
+  const sm = {}; S.produk.forEach(p => sm[p.sku] = num(p.stok));
   const aktif = S.produk.filter(p => p.status === 'Aktif' || F.items.some(i => i.sku === p.sku));
   const persen = () => F.channel === 'Shopee' ? num(S.cfg.admin_persen_shopee) : F.channel === 'TikTok Shop' ? num(S.cfg.admin_persen_tiktok) : 0;
   const calc = () => {
@@ -285,12 +300,13 @@ async function trxForm(id) {
 
 /* ---------- Produk & stok ---------- */
 PAGES.produk = async () => {
-  await loadMaster(); const stok = await api('stok.list'), sm = {}; stok.forEach(s => sm[s.sku] = s.stok);
-  $('#view').innerHTML = `<h1>Produk</h1>${S.produk.map(p => `<div class="card li" data-sku="${esc(p.sku)}"><div><div class="t">${esc(p.nama_produk)} ${esc(p.varian)}</div>
+  await loadMaster(); const sm = {}; S.produk.forEach(p => sm[p.sku] = num(p.stok));
+  $('#view').innerHTML = `<h1>Produk <button class="btn sm alt noprint" id="rfp" style="float:right;margin:0">Segarkan</button></h1>${S.produk.map(p => `<div class="card li" data-sku="${esc(p.sku)}"><div><div class="t">${esc(p.nama_produk)} ${esc(p.varian)}</div>
   <div class="s">${esc(p.sku)} · ${esc(p.kategori)} ${p.status !== 'Aktif' ? '<span class="badge b-Tidak">Nonaktif</span>' : ''}</div></div>
   <div class="right"><div class="t">${rp(p.harga_jual)}</div><div class="s">HPP ${rp(p.hpp_satuan)} · stok <b class="${(sm[p.sku] || 0) < 0 ? 'neg' : ''}">${sm[p.sku] || 0}</b></div></div></div>`).join('') || '<p class="muted center">Belum ada produk. Tambahkan produk pertama Anda.</p>'}
   <button class="btn fab" id="np">+ Produk</button>`;
   $('#np').onclick = () => produkForm(null, 0);
+  $('#rfp').onclick = () => { memo.clear(); route(); };
   document.querySelectorAll('.li[data-sku]').forEach(el => el.onclick = () => produkForm(S.produk.find(p => p.sku === el.dataset.sku), sm[el.dataset.sku] || 0));
 };
 function produkForm(p, stok) {
@@ -414,8 +430,8 @@ async function lapLabaRugi() {
     Object.keys(r.layanan_marketplace).map(k => [k, r.layanan_marketplace[k]]), [['Laba Bersih', r.laba_bersih]]));
 }
 async function lapStok() {
-  const draw = async (first) => {
-    const r = await api('laporan.stok'), f = (S.stokQ || '').toLowerCase();
+  const draw = async (first, fresh) => {
+    const r = await api('laporan.stok', {}, { fresh: !!fresh }), f = (S.stokQ || '').toLowerCase();
     const rows = r.data.filter(x => (S.stokAll || x.status === 'Aktif' || x.stok !== 0) && (`${x.sku} ${x.nama_produk} ${x.varian}`).toLowerCase().includes(f));
     const body = `<div class="grid">${[['Jumlah SKU', r.total_sku], ['Total stok (unit)', r.total_unit.toLocaleString('id-ID')], ['Nilai persediaan (HPP)', rp(r.total_nilai)], ['Stok habis / minus', r.habis + ' / ' + r.minus]].map(x => `<div class="card stat"><div class="l">${x[0]}</div><div class="v">${x[1]}</div></div>`).join('')}</div>
     <div class="card tw"><table><tr><th>Produk</th><th>Masuk</th><th>Terjual</th><th>Stok</th><th>Nilai</th></tr>${rows.map(x => `<tr data-sku="${esc(x.sku)}" style="cursor:pointer"><td>${esc(x.nama_produk)} ${esc(x.varian)}<br><span class="muted">${esc(x.sku)}${x.status !== 'Aktif' ? ' · nonaktif' : ''}</span></td><td>${x.masuk}</td><td>${x.terjual}${x.terjual_hari_ini ? `<br><span class="muted">hari ini ${x.terjual_hari_ini}</span>` : ''}</td>
@@ -423,16 +439,16 @@ async function lapStok() {
     <p class="muted">Masuk = stok awal + produksi/barang masuk. Terjual = penjualan bersih (sudah memperhitungkan edit dan void). Opname dicatat sebagai selisih. Nilai = stok × HPP saat ini. Ketuk baris untuk kartu stok.</p></div>`;
     if (first) $('#lap').innerHTML = `<div class="noprint">${field('Cari produk / SKU', `<input id="sq" type="search" value="${esc(S.stokQ || '')}">`)}<label><input type="checkbox" id="sa" style="width:auto;min-height:0" ${S.stokAll ? 'checked' : ''}> Tampilkan produk nonaktif tanpa stok</label></div><div id="sb"></div><p class="muted" id="sw"></p>
       <div class="noprint"><button class="btn sm" id="csv">Export CSV</button><button class="btn sm alt" id="rf">Perbarui</button><button class="btn sm alt" onclick="window.print()">Print</button></div>`;
-    $('#sb').innerHTML = body; $('#sw').textContent = 'Diperbarui ' + r.waktu.slice(11) + ' · otomatis setiap 30 detik';
+    $('#sb').innerHTML = body; $('#sw').textContent = 'Diperbarui ' + r.waktu.slice(11) + ' · otomatis setiap 60 detik';
     document.querySelectorAll('#sb tr[data-sku]').forEach(tr => tr.onclick = () => kartuStok(tr.dataset.sku));
     S.stokData = r;
   };
   await draw(true);
   $('#sq').oninput = e => { S.stokQ = e.target.value; draw(false).catch(() => { }); };
   $('#sa').onchange = e => { S.stokAll = e.target.checked; draw(false).catch(() => { }); };
-  $('#rf').onclick = () => draw(false).then(() => toast('Stok diperbarui', 'ok')).catch(e => toast(e.message, 'err'));
+  $('#rf').onclick = () => draw(false, true).then(() => toast('Stok diperbarui', 'ok')).catch(e => toast(e.message, 'err'));
   $('#csv').onclick = () => downloadCSV(`laporan-stok-${today()}.csv`, [['SKU', 'Produk', 'Varian', 'Status', 'Masuk', 'Terjual', 'Opname', 'Stok', 'HPP', 'Nilai']].concat(S.stokData.data.map(x => [x.sku, x.nama_produk, x.varian, x.status, x.masuk, x.terjual, x.opname, x.stok, x.hpp_satuan, x.nilai])));
-  S.timer = setInterval(() => { if (document.hidden || !$('#sb') || $('#sheet').classList.contains('open')) return; draw(false).catch(() => { }); }, 30000);
+  S.timer = setInterval(() => { if (document.hidden || !$('#sb') || $('#sheet').classList.contains('open')) return; draw(false, true).catch(() => { }); }, 60000);
 }
 async function kartuStok(sku) {
   const k = await api('stok.kartu', { sku });
