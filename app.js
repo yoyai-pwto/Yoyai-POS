@@ -140,6 +140,7 @@ async function route() {
   const [, name = 'dashboard', a, b] = location.hash.split('/'), page = PAGES[name] || PAGES.dashboard;
   $('#nav').innerHTML = NAV.map(n => `<a href="#/${n[0]}" class="${n[0] === name ? 'on' : ''}"><svg viewBox="0 0 24 24">${ICON[n[0]]}</svg>${n[1]}</a>`).join('');
   $('#nav').classList.remove('hide');
+  clearInterval(S.timer); S.timer = null;
   $('#view').innerHTML = '<p class="muted center">Memuat…</p>'; window.scrollTo(0, 0);
   try { await page(a, b); } catch (e) {
     if (!S.token) return;
@@ -213,6 +214,7 @@ async function trxForm(id) {
     F.items = d.detail.map(x => ({ sku: x.sku, qty: x.qty, harga_satuan: x.harga_satuan, diskon: x.diskon })); d.detail.forEach(x => F.hpp[x.sku] = num(x.hpp_satuan));
   } else F.items = [{ sku: '', qty: 1, harga_satuan: '', diskon: 0 }];
   const pm = {}; S.produk.forEach(p => pm[p.sku] = p);
+  const sm = {}; try { (await api('stok.list')).forEach(x => sm[x.sku] = x.stok); } catch (e) { /* offline: tanpa info stok */ }
   const aktif = S.produk.filter(p => p.status === 'Aktif' || F.items.some(i => i.sku === p.sku));
   const persen = () => F.channel === 'Shopee' ? num(S.cfg.admin_persen_shopee) : F.channel === 'TikTok Shop' ? num(S.cfg.admin_persen_tiktok) : 0;
   const calc = () => {
@@ -221,10 +223,11 @@ async function trxForm(id) {
     const tp = sub - dis, adm = F.channel === 'Offline' ? 0 : F.manual ? num(F.admin) : Math.round(tp * persen() / 100);
     return { sub, dis, tp, hpp, adm, tam: num(F.tambahan), laba: tp - hpp - adm - num(F.tambahan) };
   };
-  const rowHtml = (i, n) => `<div class="item" data-i="${n}">${field('Produk', `<select data-k="sku"><option value="">Pilih produk…</option>${aktif.map(p => `<option value="${esc(p.sku)}"${p.sku === i.sku ? ' selected' : ''}>${esc(p.nama_produk)} ${esc(p.varian)} · ${rp(p.harga_jual)}</option>`).join('')}</select>`)}
+  const rowHtml = (i, n) => `<div class="item" data-i="${n}">${field('Produk', `<select data-k="sku"><option value="">Pilih produk…</option>${aktif.map(p => `<option value="${esc(p.sku)}"${p.sku === i.sku ? ' selected' : ''}>${esc(p.nama_produk)} ${esc(p.varian)} · ${rp(p.harga_jual)}${sm[p.sku] !== undefined ? ' · stok ' + sm[p.sku] : ''}</option>`).join('')}</select>`)}
     <div class="row3">${field('Jumlah', `<input data-k="qty" type="number" inputmode="numeric" min="1" step="1" value="${i.qty}">`)}${field('Harga/unit', `<input data-k="harga_satuan" type="number" inputmode="numeric" min="0" value="${i.harga_satuan}">`)}${field('Diskon (Rp)', `<input data-k="diskon" type="number" inputmode="numeric" min="0" value="${i.diskon}">`)}</div>
     ${F.items.length > 1 ? '<button class="link danger" data-act="del">Hapus baris</button>' : ''}</div>`;
-  const totHtml = () => { const c = calc(); return `<table><tr><td>Total penjualan</td><td>${rp(c.tp)}</td></tr><tr><td>Total HPP</td><td>${rp(c.hpp)}</td></tr>
+  const stokWarn = () => id ? '' : F.items.filter(i => pm[i.sku] && sm[i.sku] !== undefined && num(i.qty) > sm[i.sku]).map(i => `<div class="warn">Stok ${esc(pm[i.sku].nama_produk)} ${esc(pm[i.sku].varian)} hanya ${sm[i.sku]}, jumlah dijual ${num(i.qty)}. Transaksi tetap bisa disimpan (stok menjadi minus).</div>`).join('');
+  const totHtml = () => { const c = calc(); return `${stokWarn()}<table><tr><td>Total penjualan</td><td>${rp(c.tp)}</td></tr><tr><td>Total HPP</td><td>${rp(c.hpp)}</td></tr>
     <tr><td>Biaya admin${F.channel !== 'Offline' && !F.manual ? ` (${persen()}%)` : ''}</td><td>${rp(c.adm)}</td></tr><tr><td>Biaya tambahan</td><td>${rp(c.tam)}</td></tr>
     <tr class="tot"><td>Keuntungan bersih</td><td class="${c.laba < 0 ? 'neg' : 'pos'}">${rp(c.laba)}</td></tr></table>`; };
   const render = () => {
@@ -295,6 +298,7 @@ function produkForm(p, stok) {
   sheet(n ? 'Produk baru' : p.nama_produk, `${field('SKU / Kode', `<input id="p_sku" value="${esc(p.sku)}" ${n ? '' : 'disabled'} autocapitalize="characters">`)}
   ${field('Nama produk', `<input id="p_nama" value="${esc(p.nama_produk)}">`)}<div class="row2">${field('Kategori', `<input id="p_kat" value="${esc(p.kategori)}">`)}${field('Varian', `<input id="p_var" value="${esc(p.varian)}">`)}</div>
   <div class="row2">${field('Harga jual (Rp)', `<input id="p_hj" type="number" inputmode="numeric" min="0" value="${p.harga_jual}">`)}${field('HPP per unit (Rp)', `<input id="p_hpp" type="number" inputmode="numeric" min="0" value="${p.hpp_satuan}">`)}</div>
+  ${n ? field('Stok awal (unit)', '<input id="p_stok" type="number" inputmode="numeric" min="0" step="1" value="0">') : ''}
   <p class="muted">Mengubah HPP atau harga tidak mengubah laporan transaksi lama (HPP disimpan per transaksi).</p>
   <button class="btn" id="p_save">Simpan</button>${n ? '' : `<button class="btn alt" id="p_st">${p.status === 'Aktif' ? 'Nonaktifkan produk' : 'Aktifkan produk'}</button>
   <h2>Stok saat ini: ${stok}</h2><div class="row2">${field('Stok masuk / produksi', '<input id="s_in" type="number" inputmode="numeric" min="1">')}${field('Stok fisik (opname)', '<input id="s_op" type="number" inputmode="numeric" min="0">')}</div>
@@ -302,6 +306,7 @@ function produkForm(p, stok) {
   $('#p_save').onclick = ev => busy(ev.target, async () => {
     try {
       const d = { nama_produk: $('#p_nama').value, kategori: $('#p_kat').value, varian: $('#p_var').value, harga_jual: $('#p_hj').value, hpp_satuan: $('#p_hpp').value };
+      if (n) d.stok_awal = $('#p_stok').value || 0;
       await api(n ? 'produk.create' : 'produk.update', Object.assign({ sku: n ? $('#p_sku').value : p.sku }, d)); closeSheet(); toast('Produk tersimpan', 'ok'); route();
     } catch (e) { toast(e.message, 'err'); }
   });
@@ -357,10 +362,10 @@ function katSheet() {
 
 /* ---------- Laporan ---------- */
 PAGES.laporan = async () => {
-  const tabs = [['harian', 'Harian'], ['bulanan', 'Bulanan'], ['labarugi', 'Laba Rugi'], ['neraca', 'Neraca']];
+  const tabs = [['harian', 'Harian'], ['bulanan', 'Bulanan'], ['labarugi', 'Laba Rugi'], ['stok', 'Stok'], ['neraca', 'Neraca']];
   $('#view').innerHTML = `<h1>Laporan</h1><div class="seg">${tabs.map(t => `<button data-t="${t[0]}" class="${S.lapTab === t[0] ? 'on' : ''}">${t[1]}</button>`).join('')}</div><div id="lap"></div>`;
   document.querySelectorAll('.seg button').forEach(b => b.onclick = () => { S.lapTab = b.dataset.t; route(); });
-  const fn = { harian: lapHarian, bulanan: lapBulanan, labarugi: lapLabaRugi, neraca: lapNeraca }[S.lapTab];
+  const fn = { harian: lapHarian, bulanan: lapBulanan, labarugi: lapLabaRugi, stok: lapStok, neraca: lapNeraca }[S.lapTab];
   try { await fn(); } catch (e) { $('#lap').innerHTML = `<div class="warn">${esc(e.message)}</div>`; }
 };
 const L = S.lap = { tgl: today(), ch: '', y: +today().slice(0, 4), m: +today().slice(5, 7), tipe: 'bulanan', nilai: today().slice(0, 7), sampai: today() };
@@ -407,6 +412,32 @@ async function lapLabaRugi() {
   $('#csv').onclick = () => downloadCSV(`laba-rugi-${dari}_${sampai}.csv`, [['Pos', 'Nominal']].concat(CH.map(c => ['Penjualan ' + c, r.pendapatan[c]]), [['Total Pendapatan', r.total_pendapatan], ['Total HPP', r.total_hpp], ['Laba Kotor', r.laba_kotor]],
     Object.keys(r.biaya_operasional).map(k => [k, r.biaya_operasional[k]]), [['Biaya tambahan transaksi', r.biaya_tambahan_transaksi], ['Admin Shopee', r.admin_marketplace['Shopee']], ['Admin TikTok Shop', r.admin_marketplace['TikTok Shop']]],
     Object.keys(r.layanan_marketplace).map(k => [k, r.layanan_marketplace[k]]), [['Laba Bersih', r.laba_bersih]]));
+}
+async function lapStok() {
+  const draw = async (first) => {
+    const r = await api('laporan.stok'), f = (S.stokQ || '').toLowerCase();
+    const rows = r.data.filter(x => (S.stokAll || x.status === 'Aktif' || x.stok !== 0) && (`${x.sku} ${x.nama_produk} ${x.varian}`).toLowerCase().includes(f));
+    const body = `<div class="grid">${[['Jumlah SKU', r.total_sku], ['Total stok (unit)', r.total_unit.toLocaleString('id-ID')], ['Nilai persediaan (HPP)', rp(r.total_nilai)], ['Stok habis / minus', r.habis + ' / ' + r.minus]].map(x => `<div class="card stat"><div class="l">${x[0]}</div><div class="v">${x[1]}</div></div>`).join('')}</div>
+    <div class="card tw"><table><tr><th>Produk</th><th>Masuk</th><th>Terjual</th><th>Stok</th><th>Nilai</th></tr>${rows.map(x => `<tr data-sku="${esc(x.sku)}" style="cursor:pointer"><td>${esc(x.nama_produk)} ${esc(x.varian)}<br><span class="muted">${esc(x.sku)}${x.status !== 'Aktif' ? ' · nonaktif' : ''}</span></td><td>${x.masuk}</td><td>${x.terjual}${x.terjual_hari_ini ? `<br><span class="muted">hari ini ${x.terjual_hari_ini}</span>` : ''}</td>
+    <td><b class="${x.kondisi === 'Minus' ? 'neg' : ''}">${x.stok}</b>${x.kondisi !== 'Tersedia' ? `<br><span class="badge ${x.kondisi === 'Minus' ? 'b-Void' : ''}">${x.kondisi}</span>` : ''}</td><td>${rp(x.nilai)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Tidak ada produk.</td></tr>'}</table>
+    <p class="muted">Masuk = stok awal + produksi/barang masuk. Terjual = penjualan bersih (sudah memperhitungkan edit dan void). Opname dicatat sebagai selisih. Nilai = stok × HPP saat ini. Ketuk baris untuk kartu stok.</p></div>`;
+    if (first) $('#lap').innerHTML = `<div class="noprint">${field('Cari produk / SKU', `<input id="sq" type="search" value="${esc(S.stokQ || '')}">`)}<label><input type="checkbox" id="sa" style="width:auto;min-height:0" ${S.stokAll ? 'checked' : ''}> Tampilkan produk nonaktif tanpa stok</label></div><div id="sb"></div><p class="muted" id="sw"></p>
+      <div class="noprint"><button class="btn sm" id="csv">Export CSV</button><button class="btn sm alt" id="rf">Perbarui</button><button class="btn sm alt" onclick="window.print()">Print</button></div>`;
+    $('#sb').innerHTML = body; $('#sw').textContent = 'Diperbarui ' + r.waktu.slice(11) + ' · otomatis setiap 30 detik';
+    document.querySelectorAll('#sb tr[data-sku]').forEach(tr => tr.onclick = () => kartuStok(tr.dataset.sku));
+    S.stokData = r;
+  };
+  await draw(true);
+  $('#sq').oninput = e => { S.stokQ = e.target.value; draw(false).catch(() => { }); };
+  $('#sa').onchange = e => { S.stokAll = e.target.checked; draw(false).catch(() => { }); };
+  $('#rf').onclick = () => draw(false).then(() => toast('Stok diperbarui', 'ok')).catch(e => toast(e.message, 'err'));
+  $('#csv').onclick = () => downloadCSV(`laporan-stok-${today()}.csv`, [['SKU', 'Produk', 'Varian', 'Status', 'Masuk', 'Terjual', 'Opname', 'Stok', 'HPP', 'Nilai']].concat(S.stokData.data.map(x => [x.sku, x.nama_produk, x.varian, x.status, x.masuk, x.terjual, x.opname, x.stok, x.hpp_satuan, x.nilai])));
+  S.timer = setInterval(() => { if (document.hidden || !$('#sb') || $('#sheet').classList.contains('open')) return; draw(false).catch(() => { }); }, 30000);
+}
+async function kartuStok(sku) {
+  const k = await api('stok.kartu', { sku });
+  sheet('Kartu stok ' + k.sku, `<p><b>${esc(k.nama_produk)} ${esc(k.varian)}</b> · stok sekarang <b>${k.stok}</b></p><div class="tw"><table><tr><th>Tanggal</th><th>Jenis</th><th>Jumlah</th><th>Saldo</th></tr>
+  ${k.riwayat.map(r => `<tr><td>${r.tanggal}<br><span class="muted">${esc(r.ref || r.catatan || '')}</span></td><td>${esc(r.jenis)}</td><td class="${r.qty < 0 ? 'neg' : 'pos'}">${r.qty > 0 ? '+' : ''}${r.qty}</td><td>${r.saldo}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">Belum ada mutasi.</td></tr>'}</table></div>`);
 }
 async function lapNeraca() {
   const r = await api('laporan.neraca', { sampai: L.sampai }), row = (l, x, c) => `<tr class="${c || ''}"><td>${l}</td><td>${rp(x)}</td></tr>`, sec = l => `<tr class="sec"><td colspan="2">${l}</td></tr>`;
