@@ -51,7 +51,7 @@ function barChart(data, color) {
   if (min < 0) s += `<text x="${pl - 4}" y="${H - pb}" text-anchor="end" class="ax">${short(min)}</text>`;
   data.forEach((d, i) => {
     const x = pl + i * bw + bw * .15, w = bw * .7, y0 = y(0), y1 = y(d.v), h = Math.max(Math.abs(y1 - y0), d.v ? 1 : 0);
-    s += `<rect x="${x}" y="${Math.min(y0, y1)}" width="${w}" height="${h}" rx="2" fill="${d.v < 0 ? '#c9453f' : (color || '#7BA05A')}"><title>${esc(d.l)}: ${rp(d.v)}</title></rect>`;
+    s += `<rect x="${x}" y="${Math.min(y0, y1)}" width="${w}" height="${h}" rx="2" fill="${d.v < 0 ? '#c9453f' : (color || '#5E8618')}"><title>${esc(d.l)}: ${rp(d.v)}</title></rect>`;
     if (data.length <= 12 || i % Math.ceil(data.length / 10) === 0) s += `<text x="${x + w / 2}" y="${H - 4}" text-anchor="middle" class="ax">${esc(d.l)}</text>`;
   });
   return s + '</svg>';
@@ -167,14 +167,14 @@ window.addEventListener('hashchange', () => { closeSheet(); route(); });
 PAGES.dashboard = async () => {
   const tgl = S.dashTgl || today(), d = await api('laporan.dashboard', { tanggal: tgl }), h = d.hari_ini, b = d.bulan;
   const st = (l, v, c) => `<div class="card stat ${c || ''}"><div class="l">${l}</div><div class="v">${v}</div></div>`;
-  const chs = CH.map(c => ({ l: c, v: b.per_channel[c].omzet, c: c === 'Shopee' ? '#FFA83A' : c === 'TikTok Shop' ? '#5b8def' : '#7BA05A' }));
+  const chs = CH.map(c => ({ l: c, v: b.per_channel[c].omzet, c: c === 'Shopee' ? '#FF8D01' : c === 'TikTok Shop' ? '#5b8def' : '#5E8618' }));
   $('#view').innerHTML = `<h1>Dashboard</h1><div class="noprint">${field('Tanggal (bulan mengikuti tanggal)', `<input type="date" id="dt" value="${tgl}">`)}</div>
   <h2>${tgl.split('-').reverse().join('/')}</h2><div class="grid">
   ${st('Omzet', rp(h.omzet), 'hi')}${st('HPP', rp(h.hpp))}${st('Admin marketplace', rp(h.biaya_admin))}
   ${st('Biaya operasional', rp(h.biaya_operasional + h.biaya_tambahan))}${st('Keuntungan', `<span class="${h.keuntungan < 0 ? 'neg' : 'pos'}">${rp(h.keuntungan)}</span>`, 'or')}${st('Transaksi', h.transaksi)}</div>
   <h2>${BULAN[+tgl.slice(5, 7) - 1]} ${tgl.slice(0, 4)}</h2><div class="grid">${st('Omzet bulan ini', rp(b.omzet), 'hi')}${st('Keuntungan bulan ini', `<span class="${b.keuntungan < 0 ? 'neg' : 'pos'}">${rp(b.keuntungan)}</span>`, 'or')}${st('Transaksi', b.transaksi)}</div>
   <div class="grid2"><div class="card"><b>Omzet harian</b>${barChart(d.seri.map(x => ({ l: x.tanggal.slice(8), v: x.omzet })))}</div>
-  <div class="card"><b>Keuntungan harian</b>${barChart(d.seri.map(x => ({ l: x.tanggal.slice(8), v: x.keuntungan })), '#FFA83A')}</div></div>
+  <div class="card"><b>Keuntungan harian</b>${barChart(d.seri.map(x => ({ l: x.tanggal.slice(8), v: x.keuntungan })), '#FF8D01')}</div></div>
   <div class="card"><b>Omzet per channel (bulan ini)</b>${hBars(chs)}</div>`;
   $('#dt').onchange = e => { S.dashTgl = e.target.value || today(); route(); };
 };
@@ -402,8 +402,8 @@ async function lapBulanan() {
   const ys = []; for (let y = +today().slice(0, 4) - 3; y <= +today().slice(0, 4) + 1; y++) ys.push(y);
   $('#lap').innerHTML = `<div class="noprint"><div class="row2">${field('Bulan', `<select id="lm">${opts(BULAN.map((b, i) => [i + 1, b]).map(x => [String(x[0]), x[1]]), String(L.m))}</select>`)}${field('Tahun', `<select id="ly">${opts(ys.map(String), String(L.y))}</select>`)}</div></div>
   <h2>${BULAN[L.m - 1]} ${L.y}</h2><div class="grid">${[['Omzet', rp(r.omzet)], ['Total HPP', rp(r.hpp)], ['Admin marketplace', rp(r.biaya_admin)], ['Biaya operasional', rp(r.biaya_operasional + r.biaya_tambahan)], ['Keuntungan bersih', rp(r.keuntungan)], ['Transaksi', r.transaksi], ['Produk terjual', r.qty]].map(x => `<div class="card stat"><div class="l">${x[0]}</div><div class="v">${x[1]}</div></div>`).join('')}</div>
-  <div class="grid2"><div class="card"><b>Omzet per hari</b>${barChart(d.seri.map(x => ({ l: x.tanggal.slice(8), v: x.omzet })))}</div><div class="card"><b>Keuntungan per hari</b>${barChart(d.seri.map(x => ({ l: x.tanggal.slice(8), v: x.keuntungan })), '#FFA83A')}</div></div>
-  <div class="card"><b>Omzet per channel</b>${hBars(CH.map(c => ({ l: c, v: r.per_channel[c].omzet, c: c === 'Shopee' ? '#FFA83A' : c === 'TikTok Shop' ? '#5b8def' : '#7BA05A' })))}</div>
+  <div class="grid2"><div class="card"><b>Omzet per hari</b>${barChart(d.seri.map(x => ({ l: x.tanggal.slice(8), v: x.omzet })))}</div><div class="card"><b>Keuntungan per hari</b>${barChart(d.seri.map(x => ({ l: x.tanggal.slice(8), v: x.keuntungan })), '#FF8D01')}</div></div>
+  <div class="card"><b>Omzet per channel</b>${hBars(CH.map(c => ({ l: c, v: r.per_channel[c].omzet, c: c === 'Shopee' ? '#FF8D01' : c === 'TikTok Shop' ? '#5b8def' : '#5E8618' })))}</div>
   <div class="card"><b>Keuntungan 6 bulan terakhir</b>${barChart(d.banding.map(x => ({ l: BULAN[+x.bulan.slice(5) - 1].slice(0, 3), v: x.keuntungan })))}</div>
   <div class="noprint"><button class="btn sm" id="csv">Export CSV</button><button class="btn sm alt" onclick="window.print()">Print</button></div>`;
   $('#lm').onchange = e => { L.m = +e.target.value; route(); }; $('#ly').onchange = e => { L.y = +e.target.value; route(); };
