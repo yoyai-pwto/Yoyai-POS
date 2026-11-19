@@ -126,8 +126,8 @@ async function flushQueue() {
 /* ---------- Login / sesi ---------- */
 function showLogin(msg) {
   $('#nav').classList.add('hide');
-  $('#view').innerHTML = `<div class="login"><div class="logo">Y</div><h1 class="center">YOYAI POS</h1>
-  <p class="muted center">Masuk dengan nama dan PIN 6 digit</p>${msg ? `<div class="warn">${esc(msg)}</div>` : ''}
+  $('#view').innerHTML = `<div class="login"><img src="logo.png" alt="Yoyai" class="logo-l">
+  <p class="center" style="margin:0;font-weight:700;color:var(--olive-d)">POS &amp; Financial Dashboard</p><p class="muted center">Masuk dengan nama dan PIN 6 digit</p>${msg ? `<div class="warn">${esc(msg)}</div>` : ''}
   <div class="card">${apiUrl() ? '' : field('URL Apps Script (…/exec)', '<input id="lu" type="url" placeholder="https://script.google.com/macros/s/.../exec">')}
   ${field('Nama', `<input id="ln" autocomplete="username" autocapitalize="words" value="${esc(S.nama)}">`)}
   ${field('PIN', '<input id="lp" type="password" inputmode="numeric" maxlength="6" autocomplete="current-password">')}
